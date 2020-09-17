@@ -4,6 +4,7 @@ Created on Mon Aug 24 10:35:01 2020
 
 @author: Grim Kalman
 """
+import time
 
 """
 Open pre-calculated masks to avoid unnecessary calculations and facilitate
@@ -87,7 +88,6 @@ class Game_State:
                           0x8900000000000089   # 16 : castle rights
                           ]
         self.score = 0
-        self.tp = {}
         self.history = []
 
     def load_FEN(self, string):
@@ -124,14 +124,14 @@ class Game_State:
             if fen[3] == '-':
                 self.bitboards[15] = 0
             else:
-                self.bitboards[15] = (2**(8*(rows.index(list(fen[3])[1]) - 1) +
+                self.bitboards[15] = (2**(8*(rows.index(list(fen[3])[1])) +
                                           (7 - cols.index(list(fen[3])[0]))))
         else:
             self.white_to_move = False
             if fen[3] == '-':
                 self.bitboards[15] = 0
             else:
-                self.bitboards[15] = (2**(8*(rows.index(list(fen[3])[1]) + 1) +
+                self.bitboards[15] = (2**(8*(rows.index(list(fen[3])[1])) +
                                           (7 - cols.index(list(fen[3])[0]))))
 
     def print_board(self):
@@ -144,8 +144,7 @@ class Game_State:
                     if board[8 * y + x] == "1":
                         chessBoard[8 * y + x] = pieces[i]
         for i in range(8):
-            print(str(8 - i), " ".join(chessBoard[8*i:8*(i + 1)]))
-        print("  a b c d e f g h")
+            print(" ".join(chessBoard[8*i:8*(i + 1)]))
 
     def generate_moves(self):
         """Generate all pseudo-legal moves."""
@@ -179,7 +178,6 @@ class Game_State:
 
         :param move: string representing a move, eg. 'e2e4'.
         """
-        self.tp.clear()
         from_col, from_row, to_col, to_row = list(move)
         from_sq = 2**((7 - cols.index(from_col)) + 8*rows.index(from_row))
         to_sq = 2**((7 - cols.index(to_col)) + 8*rows.index(to_row))
@@ -197,7 +195,7 @@ class Game_State:
 
         self.make_move((from_sq, to_sq, piece))
         self.print_board()
-        self.make_move(self.alpha_beta(6, -float('Inf'), float('Inf'))[1])
+        self.make_move(self.search(6, -float('Inf'), float('Inf'))[1])
         print()
         self.print_board()
 
@@ -226,7 +224,7 @@ class Game_State:
                         break
             if piece == 0:
                 if (move_from << 16) == move_to:
-                    self.bitboards[15] = move_to
+                    self.bitboards[15] = move_to >> 8
                 elif move_to == self.bitboards[15]:
                     self.bitboards[6] -= move_to >> 8
                     self.bitboards[13] -= move_to >> 8
@@ -263,7 +261,7 @@ class Game_State:
                         break
             if piece == 0:
                 if (move_from >> 16) == move_to:
-                    self.bitboards[15] = move_to
+                    self.bitboards[15] = move_to << 8
                 elif move_to == self.bitboards[15]:
                     self.bitboards[0] -= move_to << 8
                     self.bitboards[12] -= move_to << 8
@@ -324,7 +322,7 @@ class Game_State:
         else:
             return 1
 
-    def alpha_beta(self, depth, alpha, beta):
+    def search(self, depth, alpha, beta):
         """Preform a alpha-beta search to the desired depth."""
         if depth == 0:
             return self.score, None
@@ -335,7 +333,7 @@ class Game_State:
                 for move in move_list:
                     self.make_move(move[1])
                     if not self.is_check():
-                        score = self.alpha_beta(depth - 1, alpha, beta)[0]
+                        score = self.search(depth - 1, alpha, beta)[0]
                         if score > alpha:  # white maximizes her score
                             alpha = score
                             best_move = move[1]
@@ -352,7 +350,7 @@ class Game_State:
                 for move in move_list:
                     self.make_move(move[1])
                     if not self.is_check():
-                        score = self.alpha_beta(depth - 1, alpha, beta)[0]
+                        score = self.search(depth - 1, alpha, beta)[0]
                         if score < beta:  # black minimizes his score
                             beta = score
                             best_move = move[1]
@@ -366,16 +364,19 @@ class Game_State:
                 return (beta, best_move)
 
     def sort(self, move_list, turn):
+        """
+        Sort the moves in the list based on static-evaluation in next node.
+
+        :param move_list: list of pseduo-legal moves.
+        :param turn: -1 for white and 1 for black.
+        :return: sorted list.
+        """
         sorted_list = []
         for move in move_list:
             self.make_move(move)
             sorted_list.append((self.score, move))
             self.undo_move()
         return sorted(sorted_list, key=lambda item: turn*item[0])
-
-    def generate_hash(self):
-        """Generate a hash-key from the position."""
-        return hash(tuple(self.bitboards)) + int(self.white_to_move)
 
 
 def is_attacked(gs, s):
@@ -426,7 +427,7 @@ def white_pawn_moves(ep, bp, o, s):
     push = (s << 8) & (o ^ 0xFFFFFFFFFFFFFFFF)
     double_push = ((push & 0x0000000000FF0000) << 8) & (o ^ 0xFFFFFFFFFFFFFFFF)
     captures = (clippedL << 9 & bp | clippedR << 7 & bp |
-                (clippedL << 1 & ep) << 8 | (clippedR >> 1 & ep) << 8)
+                (clippedL << 9 & ep) | (clippedR << 7 & ep))
 
     move_to = push & -push
     while move_to > 0:
@@ -470,7 +471,7 @@ def black_pawn_moves(ep, wp, o, s):
     push = (s >> 8) & (o ^ 0xFFFFFFFFFFFFFFFF)
     double_push = ((push & 0xFF0000000000) >> 8) & (o ^ 0xFFFFFFFFFFFFFFFF)
     captures = (clippedR >> 9 & wp | clippedL >> 7 & wp |
-                (clippedL << 1 & ep) >> 8 | (clippedR >> 1 & ep) >> 8)
+                (clippedR >> 9 & ep) | (clippedL >> 7 & ep))
 
     move_to = push & -push
     while move_to > 0:
@@ -649,13 +650,18 @@ def print_bitboard(bitboard):
         print("")
 
 
+def parse_move(move):
+    move_from = bitboard_to_pos.get(move[0])[0]
+    move_to = bitboard_to_pos.get(move[1])[0]
+    return (cols[move_from[0]] + rows[7-move_from[1]] +
+            cols[move_to[0]] + rows[7-move_to[1]])
+
+
 if __name__ == "__main__":
     game = Game_State()
     game.print_board()
     while abs(game.score) < 15000:
-        print('Input move:')
+        print("Input move:")
         move = input()
         game.move(move)
     print("Game over!")
-
-    a = Game_State()
