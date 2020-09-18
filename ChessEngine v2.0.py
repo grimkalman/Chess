@@ -322,10 +322,10 @@ class Game_State:
         else:
             return 1
 
-    def search(self, depth, alpha, beta):
+    def search(self, depth, alpha, beta, nodes=0):
         """Preform a alpha-beta search to the desired depth."""
         if depth == 0:
-            return self.score, None
+            return self.score, None, nodes
         else:
             best_move = None
             if self.white_to_move:
@@ -333,7 +333,8 @@ class Game_State:
                 for move in move_list:
                     self.make_move(move[1])
                     if not self.is_check():
-                        score = self.search(depth - 1, alpha, beta)[0]
+                        score, _, nodes = self.search(depth - 1, alpha, beta,
+                                                      nodes + 1)
                         if score > alpha:  # white maximizes her score
                             alpha = score
                             best_move = move[1]
@@ -344,13 +345,14 @@ class Game_State:
                             self.undo_move()
                     else:
                         self.undo_move()
-                return (alpha, best_move)
+                return (alpha, best_move, nodes)
             else:
                 move_list = self.sort(self.generate_moves(), 1)
                 for move in move_list:
                     self.make_move(move[1])
                     if not self.is_check():
-                        score = self.search(depth - 1, alpha, beta)[0]
+                        score, _, nodes = self.search(depth - 1, alpha, beta,
+                                                      nodes + 1)
                         if score < beta:  # black minimizes his score
                             beta = score
                             best_move = move[1]
@@ -361,7 +363,18 @@ class Game_State:
                             self.undo_move()
                     else:
                         self.undo_move()
-                return (beta, best_move)
+                return (beta, best_move, nodes)
+
+    def iterative_deepening(self, max_depth):
+        depth = 1
+        while depth <= max_depth:
+            start = time.perf_counter()
+            score, best_move, nodes = self.search(depth, -float('Inf'), float('Inf'))
+            end = time.perf_counter()
+            nps = int(nodes/(end - start))
+            print("info depth {} score cp {} nodes {} nps {} bestmove {}"
+                  .format(depth, score, nodes, nps, parse_move(best_move)))
+            depth += 1
 
     def sort(self, move_list, turn):
         """
@@ -620,8 +633,8 @@ def queen_moves(o, b, s):
     :return: list of pseudo-legal moves.
     """
     move_list = []
-    move_from = s & -s
 
+    move_from = s & -s
     while move_from > 0:
         (col, row), (diag, adiag) = bitboard_to_pos.get(move_from)
         moves = ((ra.get(move_from).get(o & rmt[row]) |
@@ -665,3 +678,4 @@ if __name__ == "__main__":
         move = input()
         game.move(move)
     print("Game over!")
+    
