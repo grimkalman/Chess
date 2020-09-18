@@ -632,7 +632,7 @@ def queen_moves(o, b, s):
         move_to = moves & -moves
 
         while move_to > 0:
-            move_list.append((s, move_to, 4))
+            move_list.append((move_from, move_to, 4))
             moves = moves & (moves - 1)
             move_to = moves & -moves
         s = s & (s - 1)
