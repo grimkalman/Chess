@@ -1,6 +1,5 @@
 import time
 import random
-from collections import Counter
 
 """
 Open pre-calculated masks to avoid unnecessary calculations and facilitate
