@@ -1,15 +1,11 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Aug 24 10:35:01 2020
-
-@author: Grim Kalman
-"""
 import time
+import random
+from collections import Counter
 
 """
 Open pre-calculated masks to avoid unnecessary calculations and facilitate
 table lookup instead of on the spot calculations for speed. The attack masks
-was calculated using the o-2s trick and the idea to store the masks in
+were calculated using the o-2s trick and the idea to store the masks in
 dictionaries within a dictionary was taken from:
 "Avoiding rotated bitboards with direct lookup" (S. Tannous, 2007).
 """
@@ -53,21 +49,93 @@ with open("white_pawn_attacks.txt", "r") as file:
 with open("black_pawn_attacks.txt", "r") as file:
     black_pawn_attacks = eval(file.read())
     file.close()
-with open("piece_value_table.txt", "r") as file:
-    pst = eval(file.read())
-    file.close()
 
 pieces = ["P", "R", "N", "B", "Q", "K", "p", "r", "n", "b", "q", "k"]
 
+# Piece-values
+pv = [100, 500, 320, 330, 900, 20000]
+
+# Piece-square tables
+pst = [[ 0,  0,  0,  0,  0,  0,  0,  0,
+        50, 50, 50, 50, 50, 50, 50, 50,
+        10, 10, 20, 30, 30, 20, 10, 10,
+         5,  5, 10, 25, 25, 10,  5,  5,
+         0,  0,  0, 20, 20,  0,  0,  0,
+         5, -5,-10,  0,  0,-10, -5,  5,
+         5, 10, 10,-20,-20, 10, 10,  5,
+         0,  0,  0,  0,  0,  0,  0,  0],
+       
+       [ 0,  0,  0,  0,  0,  0,  0,  0,
+         5, 10, 10, 10, 10, 10, 10,  5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+        -5,  0,  0,  0,  0,  0,  0, -5,
+         0,  0,  0,  5,  5,  0,  0,  0],
+       
+       [-50,-40,-30,-30,-30,-30,-40,-50,
+        -40,-20,  0,  0,  0,  0,-20,-40,
+        -30,  0, 10, 15, 15, 10,  0,-30,
+        -30,  5, 15, 20, 20, 15,  5,-30,
+        -30,  0, 15, 20, 20, 15,  0,-30,
+        -30,  5, 10, 15, 15, 10,  5,-30,
+        -40,-20,  0,  5,  5,  0,-20,-40,
+        -50,-40,-30,-30,-30,-30,-40,-50],
+       
+       [-20,-10,-10,-10,-10,-10,-10,-20,
+        -10,  0,  0,  0,  0,  0,  0,-10,
+        -10,  0,  5, 10, 10,  5,  0,-10,
+        -10,  5,  5, 10, 10,  5,  5,-10,
+        -10,  0, 10, 10, 10, 10,  0,-10,
+        -10, 10, 10,  5,  5, 10, 10,-10,
+        -10, 10,  0,  0,  0,  0, 10,-10,
+        -20,-10,-10,-10,-10,-10,-10,-20],
+       
+       [-20,-10,-10, -5, -5,-10,-10,-20,
+        -10,  0,  0,  0,  0,  0,  0,-10,
+        -10,  0,  5,  5,  5,  5,  0,-10,
+         -5,  0,  5,  5,  5,  5,  0, -5,
+          0,  0,  5,  5,  5,  5,  0, -5,
+        -10,  5,  5,  5,  5,  5,  0,-10,
+        -10,  0,  5,  0,  0,  0,  0,-10,
+        -20,-10,-10, -5, -5,-10,-10,-20],
+       
+       [-30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -30,-40,-40,-50,-50,-40,-40,-30,
+        -20,-30,-30,-40,-40,-30,-30,-20,
+        -10,-20,-20,-20,-20,-20,-20,-10,
+         20, 20,  0,  0,  0,  0, 20, 20,
+         20, 30, 10,  0,  0, 10, 30, 20]]
+
+# Piece-values and piece-square table combined into a piece-value table
+pvt = {}
+for i, value in enumerate(pv):
+    pvt[i] = {}
+    pvt[i + 6] = {}
+    for j in range(64):
+        pvt[i][2**(63-j)] = value + pst[i][j]
+        pvt[i + 6][2**(63 - (8*(7 - int(j/8)) + (j % 8)))] = -value - pst[i][j]
+
+# Zoobrist keys
+zk = {}
+for i in range(12):
+    zk[i]= {}
+    for j in range(64):
+        zk[i][2**j] = random.randint(0, 0xffffffffffffffff)
+        
 rows = ["1", "2", "3", "4", "5", "6", "7", "8"]
 
 cols = ["a", "b", "c", "d", "e", "f", "g", "h"]
 
 
-class Game_State:
+class Board:
     """Class that represents the state of the chessboard."""
 
     def __init__(self):
+        self.score = 0
         self.white_to_move = True
         self.bitboards = [0xFF00,               # 0 : white pawns
                           0x81,                 # 1 : white rooks
@@ -87,8 +155,8 @@ class Game_State:
                           0,                   # 15 : en passant
                           0x8900000000000089   # 16 : castle rights
                           ]
-        self.score = 0
         self.history = []
+        self.hash = 0
 
     def load_FEN(self, string):
         """Load a position from a FEN-string."""
@@ -160,23 +228,23 @@ class Game_State:
                     knight_moves(self.bitboards[12], self.bitboards[2]) +
                     white_pawn_moves(self.bitboards[15], self.bitboards[13],
                                      self.bitboards[14], self.bitboards[0]))
-        else:
-            return (king_moves(self, self.bitboards[14], self.bitboards[16],
-                               self.bitboards[13], self.bitboards[11]) +
-                    queen_moves(self.bitboards[14], self.bitboards[13],
-                                self.bitboards[10]) +
-                    rook_moves(self.bitboards[14], self.bitboards[13],
-                               self.bitboards[7]) +
-                    bishop_moves(self.bitboards[14], self.bitboards[13],
-                                 self.bitboards[9]) +
-                    knight_moves(self.bitboards[13], self.bitboards[8]) +
-                    black_pawn_moves(self.bitboards[15], self.bitboards[12],
-                                     self.bitboards[14], self.bitboards[6]))
+
+        return (king_moves(self, self.bitboards[14], self.bitboards[16],
+                           self.bitboards[13], self.bitboards[11]) +
+                queen_moves(self.bitboards[14], self.bitboards[13],
+                            self.bitboards[10]) +
+                rook_moves(self.bitboards[14], self.bitboards[13],
+                           self.bitboards[7]) +
+                bishop_moves(self.bitboards[14], self.bitboards[13],
+                             self.bitboards[9]) +
+                knight_moves(self.bitboards[13], self.bitboards[8]) +
+                black_pawn_moves(self.bitboards[15], self.bitboards[12],
+                                 self.bitboards[14], self.bitboards[6]))
 
     def move(self, move):
         """Update the game state given a move.
 
-        :param move: string representing a move, eg. 'e2e4'.
+        : param move: string representing a move, eg. 'e2e4'
         """
         from_col, from_row, to_col, to_row = list(move)
         from_sq = 2**((7 - cols.index(from_col)) + 8*rows.index(from_row))
@@ -195,244 +263,223 @@ class Game_State:
 
         self.make_move((from_sq, to_sq, piece))
         self.print_board()
-        self.make_move(self.search(6, -float('Inf'), float('Inf'))[1])
-        print()
-        self.print_board()
+        self.make_move(iterative_deepening(self, 6))
 
     def make_move(self, move):
         """Update the game state given a move.
 
-        :param move: (from, to, piece) tuple. Eg. a pawn move from e2 to e4
-                      would be written as: (2048, 134217728, 0).
+        : param move: (from, to, piece) tuple. Eg. a pawn move from e2 to e4
+                      would be written as: (2048, 134217728, 0)
         """
         self.history.append((self.white_to_move, self.bitboards[:],
-                             self.score))
+                             self.score, self.hash))
         move_from, move_to, piece = move
 
         if self.white_to_move:
             self.bitboards[piece] += move_to - move_from
             self.bitboards[12] += move_to - move_from
-            self.score += (pst.get(piece).get(move_to) -
-                           pst.get(piece).get(move_from))
+            self.score += (pvt.get(piece).get(move_to) -
+                           pvt.get(piece).get(move_from))
+            self.hash ^= zk.get(piece).get(move_from)
+            self.hash ^= zk.get(piece).get(move_to)
             if (self.bitboards[13] & move_to):
                 for i in range(6, 12):
                     if (self.bitboards[i] & move_to):
                         self.bitboards[i] -= move_to
                         self.bitboards[13] -= move_to
                         self.bitboards[15] = 0
-                        self.score += pst.get(i).get(move_to)
+                        self.score -= pvt.get(i).get(move_to)
+                        self.hash ^= zk.get(i).get(move_to)
                         break
             if piece == 0:
                 if (move_from << 16) == move_to:
                     self.bitboards[15] = move_to >> 8
+                    self.hash ^= self.bitboards[15]
                 elif move_to == self.bitboards[15]:
                     self.bitboards[6] -= move_to >> 8
                     self.bitboards[13] -= move_to >> 8
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
+                    self.score -= pvt.get(6).get(move_to)
                 elif move_to & 0xff00000000000000 != 0:
                     self.bitboards[0] -= move_to
                     self.bitboards[4] += move_to
+                    self.score += (pvt.get(4).get(move_to) -
+                                   pvt.get(0).get(move_from))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(0).get(move_to)
+                    self.hash ^= zk.get(4).get(move_to)
                 else:
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
             elif piece == 5:
                 if move_from >> 2 == move_to:
                     self.bitboards[1] += (move_from >> 1) - (move_to >> 1)
                     self.bitboards[12] += (move_from >> 1) - (move_to >> 1)
+                    self.score += (pvt.get(1).get((move_from >> 1)) -
+                                   pvt.get(1).get((move_to >> 1)))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(1).get((move_from >> 1))
+                    self.hash ^= zk.get(1).get((move_to >> 1))
                 elif move_from << 2 == move_to:
                     self.bitboards[1] += (move_from << 1) - (move_to << 2)
                     self.bitboards[12] += (move_from << 1) - (move_to << 2)
+                    self.score += (pvt.get(1).get((move_from << 1)) -
+                                   pvt.get(1).get((move_to << 2)))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(1).get((move_from << 1))
+                    self.hash ^= zk.get(1).get((move_to << 2))
                 else:
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
             else:
+                self.hash ^= self.bitboards[15]
                 self.bitboards[15] = 0
             self.white_to_move = False
+            self.hash -= 1
         else:
             self.bitboards[piece + 6] += move_to - move_from
             self.bitboards[13] += move_to - move_from
-            self.score -= (pst.get(piece + 6).get(move_to) -
-                           pst.get(piece + 6).get(move_from))
+            self.score += (pvt.get(piece + 6).get(move_to) -
+                           pvt.get(piece + 6).get(move_from))
+            self.hash ^= zk.get(piece).get(move_from)
+            self.hash ^= zk.get(piece).get(move_to)
             if (self.bitboards[12] & move_to):
                 for i in range(6):
                     if (self.bitboards[i] & move_to):
                         self.bitboards[i] -= move_to
                         self.bitboards[12] -= move_to
                         self.bitboards[15] = 0
-                        self.score -= pst.get(i).get(move_to)
+                        self.score -= pvt.get(i).get(move_to)
+                        self.hash ^= zk.get(i).get(move_to)
                         break
             if piece == 0:
                 if (move_from >> 16) == move_to:
                     self.bitboards[15] = move_to << 8
+                    self.hash ^= self.bitboards[15]
                 elif move_to == self.bitboards[15]:
                     self.bitboards[0] -= move_to << 8
                     self.bitboards[12] -= move_to << 8
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
+                    self.score -= pvt.get(0).get(move_to)
                 elif move_to & 0xff != 0:
                     self.bitboards[6] -= move_to
                     self.bitboards[10] += move_to
+                    self.score += (pvt.get(10).get(move_to) -
+                                   pvt.get(6).get(move_from))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(6).get(move_to)
+                    self.hash ^= zk.get(10).get(move_to)
                 else:
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
             elif piece == 5:
                 if move_from >> 2 == move_to:
                     self.bitboards[7] += (move_from >> 1) - (move_to >> 1)
                     self.bitboards[13] += (move_from >> 1) - (move_to >> 1)
+                    self.score += (pvt.get(7).get((move_from >> 1)) -
+                                   pvt.get(7).get((move_to >> 1)))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(7).get((move_from >> 1))
+                    self.hash ^= zk.get(7).get((move_to >> 1))
                 elif move_from << 2 == move_to:
                     self.bitboards[7] += (move_from << 1) - (move_to << 2)
                     self.bitboards[13] += (move_from >> 1) - (move_to >> 1)
+                    self.score += (pvt.get(7).get((move_from << 1)) -
+                                   pvt.get(7).get((move_to << 2)))
+                    self.hash ^= self.bitboards[15]
+                    self.bitboards[15] = 0
+                    self.hash ^= zk.get(7).get((move_from << 1))
+                    self.hash ^= zk.get(7).get((move_to << 2))
                 else:
+                    self.hash ^= self.bitboards[15]
                     self.bitboards[15] = 0
             else:
+                self.hash ^= self.bitboards[15]
                 self.bitboards[15] = 0
             self.white_to_move = True
+            self.hash += 1
 
         self.bitboards[14] = self.bitboards[12] | self.bitboards[13]
+        self.hash ^= self.bitboards[16]
         self.bitboards[16] = ((move_from & self.bitboards[16]) ^
                               self.bitboards[16])
         self.bitboards[16] = ((move_to & self.bitboards[16]) ^
                               self.bitboards[16])
+        self.hash ^= self.bitboards[16]
 
     def undo_move(self):
         """Undo the previous move."""
-        self.white_to_move, self.bitboards, self.score = self.history.pop()
+        self.white_to_move, self.bitboards, self.score, self.hash = self.history.pop()
 
     def is_check(self):
-        """Determine if the king is in check.
+        """Determine if the king is in check."""
+        if self.white_to_move:
+            return is_attacked(self, self.bitboards[11], False)
 
-        :return: bitboard containing all attacking pieces or 1 if the king is
-                 taken.
-        """
-        if self.white_to_move and self.bitboards[5] != 0:
-            (col, row), (diag, adiag) = bitboard_to_pos.get(self.bitboards[11])
-            return ((self.bitboards[4] | self.bitboards[3]) & (da.get(self.bitboards[11]).get(self.bitboards[14] & dmt[diag]) | ada.get(self.bitboards[11]).get(self.bitboards[14] & admt[adiag]))) | ((self.bitboards[4] | self.bitboards[1]) & (ra.get(self.bitboards[11]).get(self.bitboards[14] & rmt[row]) | fa.get(self.bitboards[11]).get(self.bitboards[14] & fmt[col]))) | (self.bitboards[2] & knight_attacks.get(self.bitboards[11])) | (self.bitboards[0] & black_pawn_attacks.get(self.bitboards[11])) | (self.bitboards[5] & king_attacks.get(self.bitboards[11]))
-        elif not self.white_to_move and self.bitboards[11] != 0:
-            (col, row), (diag, adiag) = bitboard_to_pos.get(self.bitboards[5])
-            return ((self.bitboards[10] | self.bitboards[9]) & (da.get(self.bitboards[5]).get(self.bitboards[14] & dmt[diag]) | ada.get(self.bitboards[5]).get(self.bitboards[14] & admt[adiag]))) | ((self.bitboards[10] | self.bitboards[7]) & (ra.get(self.bitboards[5]).get(self.bitboards[14] & rmt[row]) | fa.get(self.bitboards[5]).get(self.bitboards[14] & fmt[col]))) | (self.bitboards[8] & knight_attacks.get(self.bitboards[5])) | (self.bitboards[6] & white_pawn_attacks.get(self.bitboards[5])) | (self.bitboards[11] & king_attacks.get(self.bitboards[5]))
-        else:
-            return 1
+        return is_attacked(self, self.bitboards[5], True)
 
     def perft(self, depth):
         """Traverse the game tree, mainly for debugging purposes."""
-        if depth > 0:
-            nodes = 0
-            for move in self.generate_moves():
-                self.make_move(move)
-                if not self.is_check():
-                    nodes += self.perft(depth - 1)
-                self.undo_move()
-            return nodes
-        else:
+        if depth == 0:
             return 1
 
-    def search(self, depth, alpha, beta, nodes=0):
-        """Preform a alpha-beta search to the desired depth."""
-        if depth == 0:
-            return self.score, None, nodes
-        else:
-            best_move = None
-            if self.white_to_move:
-                move_list = self.sort(self.generate_moves(), -1)
-                for move in move_list:
-                    self.make_move(move[1])
-                    if not self.is_check():
-                        score, _, nodes = self.search(depth - 1, alpha, beta,
-                                                      nodes + 1)
-                        if score > alpha:  # white maximizes her score
-                            alpha = score
-                            best_move = move[1]
-                            self.undo_move()
-                            if alpha >= beta:  # alpha-beta cutoff
-                                break
-                        else:
-                            self.undo_move()
-                    else:
-                        self.undo_move()
-                return (alpha, best_move, nodes)
-            else:
-                move_list = self.sort(self.generate_moves(), 1)
-                for move in move_list:
-                    self.make_move(move[1])
-                    if not self.is_check():
-                        score, _, nodes = self.search(depth - 1, alpha, beta,
-                                                      nodes + 1)
-                        if score < beta:  # black minimizes his score
-                            beta = score
-                            best_move = move[1]
-                            self.undo_move()
-                            if alpha >= beta:  # alpha-beta cutoff
-                                break
-                        else:
-                            self.undo_move()
-                    else:
-                        self.undo_move()
-                return (beta, best_move, nodes)
-
-    def iterative_deepening(self, max_depth):
-        depth = 1
-        while depth <= max_depth:
-            start = time.perf_counter()
-            score, best_move, nodes = self.search(depth, -float('Inf'), float('Inf'))
-            end = time.perf_counter()
-            nps = int(nodes/(end - start))
-            print("info depth {} score cp {} nodes {} nps {} bestmove {}"
-                  .format(depth, score, nodes, nps, parse_move(best_move)))
-            depth += 1
-
-    def sort(self, move_list, turn):
-        """
-        Sort the moves in the list based on static-evaluation in next node.
-
-        :param move_list: list of pseduo-legal moves.
-        :param turn: -1 for white and 1 for black.
-        :return: sorted list.
-        """
-        sorted_list = []
-        for move in move_list:
+        nodes = 0
+        for move in self.generate_moves():
             self.make_move(move)
-            sorted_list.append((self.score, move))
+            if not self.is_check():
+                nodes += self.perft(depth - 1)
             self.undo_move()
-        return sorted(sorted_list, key=lambda item: turn*item[0])
+        return nodes
 
 
-def is_attacked(gs, s):
+def is_attacked(Board, s, white_to_move):
     """
     Determine if the square is attacked by enemy pieces.
 
-    :param gs: a Game_State class object.
-    :param s: bitboard with the square to be checked set to 1.
-    :return: bitboard containing all attacking pieces.
+    : param Board: a Board class object
+    : param s: bitboard with the square to be checked set to 1
+    : return: bitboard containing all attacking pieces
     """
     (col, row), (diag, adiag) = bitboard_to_pos.get(s)
 
-    if gs.white_to_move:
-        return (((gs.bitboards[10] | gs.bitboards[9]) &
-                (da.get(s).get(gs.bitboards[14] & dmt[diag]) |
-                 ada.get(s).get(gs.bitboards[14] & admt[adiag]))) |
-                ((gs.bitboards[10] | gs.bitboards[7]) &
-                 (ra.get(s).get(gs.bitboards[14] & rmt[row]) |
-                  fa.get(s).get(gs.bitboards[14] & fmt[col]))) |
-                (gs.bitboards[8] & knight_attacks.get(s)) |
-                (gs.bitboards[6] & white_pawn_attacks.get(s)) |
-                (gs.bitboards[11] & king_attacks.get(s)))
-    else:
-        return (((gs.bitboards[4] | gs.bitboards[3]) &
-                 (da.get(s).get(gs.bitboards[14] & dmt[diag]) |
-                  ada.get(s).get(gs.bitboards[14] & admt[adiag]))) |
-                ((gs.bitboards[4] | gs.bitboards[1]) &
-                 (ra.get(s).get(gs.bitboards[14] & rmt[row]) |
-                  fa.get(s).get(gs.bitboards[14] & fmt[col]))) |
-                (gs.bitboards[2] & knight_attacks.get(s)) |
-                (gs.bitboards[0] & black_pawn_attacks.get(s)) |
-                (gs.bitboards[5] & king_attacks.get(s)))
+    if white_to_move:
+        return (((Board.bitboards[10] | Board.bitboards[9]) &
+                (da.get(s).get(Board.bitboards[14] & dmt[diag]) |
+                 ada.get(s).get(Board.bitboards[14] & admt[adiag]))) |
+                ((Board.bitboards[10] | Board.bitboards[7]) &
+                 (ra.get(s).get(Board.bitboards[14] & rmt[row]) |
+                  fa.get(s).get(Board.bitboards[14] & fmt[col]))) |
+                (Board.bitboards[8] & knight_attacks.get(s)) |
+                (Board.bitboards[6] & white_pawn_attacks.get(s)) |
+                (Board.bitboards[11] & king_attacks.get(s)))
+
+    return (((Board.bitboards[4] | Board.bitboards[3]) &
+             (da.get(s).get(Board.bitboards[14] & dmt[diag]) |
+              ada.get(s).get(Board.bitboards[14] & admt[adiag]))) |
+            ((Board.bitboards[4] | Board.bitboards[1]) &
+             (ra.get(s).get(Board.bitboards[14] & rmt[row]) |
+              fa.get(s).get(Board.bitboards[14] & fmt[col]))) |
+            (Board.bitboards[2] & knight_attacks.get(s)) |
+            (Board.bitboards[0] & black_pawn_attacks.get(s)) |
+            (Board.bitboards[5] & king_attacks.get(s)))
 
 
 def white_pawn_moves(ep, bp, o, s):
     """
     Generate a bitboard of available pawn moves for white.
 
-    :param ep: bitboard containing the available en passant captures.
-    :param bp: bitboard containing all black pieces.
-    :param o: bitboard containing all pieces.
-    :param s: bitboard of all white pawns.
-    :return: list of pseudo-legal moves.
+    : param ep: bitboard containing the available en passant captures
+    : param bp: bitboard containing all black pieces
+    : param o: bitboard containing all pieces
+    : param s: bitboard of all white pawns
+    : return: list of pseudo-legal moves
     """
     move_list = []
     clippedL = s & 0x7F7F7F7F7F7F7F7F
@@ -472,11 +519,11 @@ def black_pawn_moves(ep, wp, o, s):
     """
     Generate a bitboard of available pawn moves for black.
 
-    :param ep: bitboard containing the available en passant captures.
-    :param wp: bitboard containing all white pieces.
-    :param o: bitboard containing all pieces.
-    :param s: bitboard of all white pawns.
-    :return: list of pseudo-legal moves.
+    : param ep: bitboard containing the available en passant captures
+    : param wp: bitboard containing all white pieces
+    : param o: bitboard containing all pieces
+    : param s: bitboard of all white pawns
+    : return: list of pseudo-legal moves
     """
     move_list = []
     clippedL = s & 0x7F7F7F7F7F7F7F7F
@@ -512,20 +559,20 @@ def black_pawn_moves(ep, wp, o, s):
     return move_list
 
 
-def king_moves(gs, o, c, b, s):
+def king_moves(Board, o, c, b, s):
     """
     Generate a bitboard of available king moves.
 
-    :param gs: a Game_State class object.
-    :param o: bitboard containing all pieces.
-    :param c: biboard containing castle relevant pieces that has not moved.
-    :param b: bitboard of all pieces of own color.
-    :param s: bitboard of the king
-    :return: list of pseudo-legal moves.
+    : param Board: a Board class object
+    : param o: bitboard containing all pieces
+    : param c: biboard containing castle relevant pieces that has not moved
+    : param b: bitboard of all pieces of own color
+    : param s: bitboard of the king
+    : return: list of pseudo-legal moves
     """
     move_list = []
-    moves = king_attacks.get(s) & (b ^ 0xFFFFFFFFFFFFFFFF)
 
+    moves = king_attacks.get(s) & (b ^ 0xFFFFFFFFFFFFFFFF)
     move_to = moves & -moves
     while move_to > 0:
         move_list.append((s, move_to, 5))
@@ -533,12 +580,14 @@ def king_moves(gs, o, c, b, s):
         move_to = moves & -moves
 
     if s | c == c and s >> 3 & c != 0 and s >> 1 & o == 0 and s >> 2 & o == 0:
-        if not is_attacked(gs, s) and not is_attacked(gs, s >> 1):
+        if not is_attacked(Board, s, Board.white_to_move) and (not
+               is_attacked(Board, s >> 1, Board.white_to_move)):
             move_list.append((s, s >> 2, 5))  # O-O
 
     if (s | c == c and s << 4 & c != 0 and s << 1 & o == 0 and
-        s << 2 & o == 0 and s << 3 & o == 0):
-        if not is_attacked(gs, s) and not is_attacked(gs, s << 1):
+            s << 2 & o == 0 and s << 3 & o == 0):
+        if not is_attacked(Board, s, Board.white_to_move) and (not
+               is_attacked(Board, s << 1, Board.white_to_move)):
             move_list.append((s, s << 2, 5))  # O-O-O
 
     return move_list
@@ -547,9 +596,9 @@ def king_moves(gs, o, c, b, s):
 def knight_moves(b, s):
     """Generate a bitboard of available knight moves.
 
-    :param b: bitboard of all pieces of own color.
-    :param s: bitboard of the king
-    :return: list of pseudo-legal moves.
+    : param b: bitboard of all pieces of own color
+    : param s: bitboard of the king
+    : return: list of pseudo-legal moves
     """
     move_list = []
 
@@ -571,10 +620,10 @@ def knight_moves(b, s):
 def rook_moves(o, b, s):
     """Generate a bitboard of available rook moves.
 
-    :param o: bitboard of all pieces
-    :param b: bitboard of all pieces of own color.
-    :param s: bitboard of the king
-    :return: list of pseudo-legal moves.
+    : param o: bitboard of all pieces
+    : param b: bitboard of all pieces of own color
+    : param s: bitboard of the king
+    : return: list of pseudo-legal moves
     """
     move_list = []
 
@@ -599,10 +648,10 @@ def rook_moves(o, b, s):
 def bishop_moves(o, b, s):
     """Generate a bitboard of available bishop moves.
 
-    :param o: bitboard of all pieces
-    :param b: bitboard of all pieces of own color.
-    :param s: bitboard of the king
-    :return: list of pseudo-legal moves.
+    : param o: bitboard of all pieces
+    : param b: bitboard of all pieces of own color
+    : param s: bitboard of the king
+    : return: list of pseudo-legal moves
     """
     move_list = []
 
@@ -627,10 +676,10 @@ def bishop_moves(o, b, s):
 def queen_moves(o, b, s):
     """Generate a bitboard of available queen moves.
 
-    :param o: bitboard of all pieces
-    :param b: bitboard of all pieces of own color.
-    :param s: bitboard of the king
-    :return: list of pseudo-legal moves.
+    : param o: bitboard of all pieces
+    : param b: bitboard of all pieces of own color
+    : param s: bitboard of the king
+    : return: list of pseudo-legal moves
     """
     move_list = []
 
@@ -664,14 +713,143 @@ def print_bitboard(bitboard):
 
 
 def parse_move(move):
+    """Translate a move on the form (2048, 134217728, 0) to 'e2e4'."""
     move_from = bitboard_to_pos.get(move[0])[0]
     move_to = bitboard_to_pos.get(move[1])[0]
-    return (cols[move_from[0]] + rows[7-move_from[1]] +
-            cols[move_to[0]] + rows[7-move_to[1]])
+    return (cols[move_from[0]] + rows[7 - move_from[1]] +
+            cols[move_to[0]] + rows[7 - move_to[1]])
 
+
+def sort(Board, moves):
+        """
+        Sort the moves in the list based on static-evaluation in next node.
+        :param move_list: list of pseduo-legal moves.
+        :param turn: -1 for white and 1 for black.
+        :return: sorted list.
+        """
+        sorted_moves = []
+        for move in moves:
+            Board.make_move(move)
+            sorted_moves.append((Board.score, move))
+            Board.undo_move()
+        
+        if Board.white_to_move:
+            return sorted(sorted_moves, key=lambda item: -1*item[0])
+        else:
+            return sorted(sorted_moves, key=lambda item: 1*item[0])
+
+
+def negamax(Board, depth, alpha, beta, nodes=0, null=False):
+    """Negamax algorithm to search the game tree and return the best move.
+
+    : param Board: a Board class object
+    : param depth: number of moves to traverse in the game tree
+    : param alpha: best value for player A at a certain depth
+    : param beta: best value for player B at a certain depth
+    : param nodes: number of visited positions in the game tree
+    : return: list of the best line at the given depth. Score of the line &
+    number of nodes visited.
+    """
+    if Board.hash in tt and tt.get(Board.hash)[1] >= depth:
+        if tt.get(Board.hash)[2] == "E":
+            return tt.get(Board.hash)[0], nodes, tt.get(Board.hash)[3]
+        elif tt.get(Board.hash)[2] == "L":
+            alpha = max(alpha, tt.get(Board.hash)[0])
+        elif tt.get(Board.hash)[2] == "U":
+            beta = min(beta, tt.get(Board.hash)[0])
+        if alpha >= beta:
+            return tt.get(Board.hash)[0], nodes, tt.get(Board.hash)[3]
+
+    if depth == 0:
+        return (-1 + 2*Board.white_to_move)*Board.score, nodes, None
+
+    original_alpha = alpha
+    best_move, value = None, -30300
+
+    moves = sort(Board, Board.generate_moves())
+    for move in moves:
+        Board.make_move(move[1])
+        if Board.is_check():
+            Board.undo_move()
+        else:
+            score, nodes, _ = negamax(Board, depth - 1, -beta, -alpha, nodes + 1, True)
+            value = max(value, -score)
+            Board.undo_move()
+            if -score >= alpha:
+                best_move, alpha = move[1], value
+            if alpha >= beta:
+                break
+
+    if value <= original_alpha:
+        tt[Board.hash] = (value, depth, "U", best_move)
+    elif value >= beta:
+        tt[Board.hash] = (value, depth, "L", best_move)
+    else:
+        tt[Board.hash] = (value, depth, "E", best_move)
+
+    return value, nodes, best_move
+
+
+def MTDF(Board, f, d):
+    g = f
+    upperbound = 30300
+    lowerbound = -30300
+    while lowerbound < upperbound:
+        if g == lowerbound:
+            beta = g + 1 
+        else:
+            beta = g
+        g, nodes, best_move = negamax(Board, d, beta - 1, beta)
+        if g < beta:
+            upperbound = g
+        else:
+            lowerbound = g
+    return g, nodes, best_move
+
+
+def iterative_deepening(Board, max_depth):
+    global tt
+    f, depth, best_move, tt = 0, 0, None, {}
+
+    while depth <= max_depth:
+        start = time.perf_counter()
+        f, nodes, move = MTDF(Board, f, depth)
+        end = time.perf_counter()
+        if move is not None:
+            best_move = move
+        print("info depth {} score cp {} nodes {} nps {}"
+              .format(depth, f, nodes, int(nodes/(end - start))))
+        depth += 2
+    print("bestmove {}".format(parse_move(best_move)))
+    return best_move
+
+# class UCI:
+
+#     def coms():
+#         while(True):
+#             command = input()
+#             parsed_command = command.split(" ")
+#             if parsed_command[0] == "uci":
+#                 print("id name GrimBOT")
+#                 print("id author Grim E.Kalman")
+#                 print("uciok")
+#             elif parsed_command[0] == "isready":
+#                 print("readyok")
+#             elif parsed_command[0] == "position":
+#                 if parsed_command[1] == "startpos":
+#                     board = Board()
+#                     for move in parsed_command[3:]:
+#                         board.move(move)
+#             elif parsed_command[0] == "go":
+#                 if board.white_to_move:
+#                     iterative_deepening(board, int(parsed_command[2]))
+#                 else:
+#                     iterative_deepening(board, int(parsed_command[4]))
+#             elif parsed_command[0] == "quit":
+#                 quit()
 
 if __name__ == "__main__":
-    game = Game_State()
+    game = Board()
     game.print_board()
     while abs(game.score) < 15000:
         print("Input move:")
