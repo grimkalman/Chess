@@ -263,6 +263,7 @@ class Board:
         self.make_move((from_sq, to_sq, piece))
         self.print_board()
         self.make_move(iterative_deepening(self, 6))
+        self.print_board()
 
     def make_move(self, move):
         """Update the game state given a move.
